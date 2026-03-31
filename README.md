@@ -7,8 +7,8 @@ A read-only Google Drive MCP server for Claude Desktop, written in Go. Provides 
 - **List files** -- Browse files in Google Drive with optional name filtering and folder scoping
 - **Search files** -- Full-text and name search across your entire Drive
 - **File metadata** -- Retrieve detailed metadata for any file by ID
-- **Read files** -- Extract text from Google Docs and download text-based regular files
-- **Read spreadsheets** -- Query specific ranges from Google Sheets using A1 notation
+- **Read files** -- Extract text from Google Docs, read Google Sheets as TSV, or download text-based regular files (auto-detects type by MIME)
+- **Read spreadsheets** -- Read specific cell ranges from Google Sheets using A1 notation (use this when you need a targeted range rather than the whole sheet)
 
 ## Security
 
@@ -124,8 +124,8 @@ If `credentials.json` and `token.json` are in the same directory as the binary, 
 | `gdrive_list_files` | List files in Drive, optionally filtered by name or folder | `query` (opt), `folder_id` (opt), `page_size` (opt, default 20, max 100), `page_token` (opt) |
 | `gdrive_search` | Search for files by name or content | `query` (required), `page_size` (opt, default 20, max 100), `page_token` (opt) |
 | `gdrive_get_file_metadata` | Get detailed metadata for a file | `file_id` (required) |
-| `gdrive_read_file` | Read file content (Docs, Sheets, or text files) | `file_id` (required) |
-| `gdrive_read_sheet` | Read spreadsheet values as TSV | `file_id` (required), `range` (opt, A1 notation; reads entire first sheet if omitted) |
+| `gdrive_read_file` | Read a file's content -- auto-detects type: extracts text from Docs, reads all data from Sheets as TSV, or downloads text-based regular files | `file_id` (required) |
+| `gdrive_read_sheet` | Read a specific range from a Google Sheet as TSV -- use this instead of `gdrive_read_file` when you need a targeted cell range | `file_id` (required), `range` (opt, A1 notation; reads entire first sheet if omitted) |
 
 ## Cross-Compilation
 
