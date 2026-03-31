@@ -1,0 +1,18 @@
+# Binaries
+gdrive-readonly-mcp
+gdrive-readonly-mcp.exe
+*.exe
+
+# OAuth credentials (NEVER commit these)
+credentials.json
+token.json
+
+# Go
+vendor/
+*.test
+*.out
+
+# IDE
+.vscode/
+.idea/
+*.swp
