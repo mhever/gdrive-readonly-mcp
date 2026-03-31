@@ -41,6 +41,6 @@ func main() {
 	registerTools(server)
 
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
-		log.Fatal(err)
+		log.Fatalf("MCP server error: %v", err)
 	}
 }

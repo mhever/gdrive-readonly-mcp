@@ -145,12 +145,12 @@ func handleReadFile(ctx context.Context, req *mcp.CallToolRequest, input readFil
 	default:
 		// Check for other unsupported Google Apps types.
 		if strings.HasPrefix(meta.MimeType, "application/vnd.google-apps.") {
-			return errorResult(fmt.Errorf("Unsupported Google Apps type: %s. This server supports Docs and Sheets.", meta.MimeType)), nil, nil
+			return errorResult(fmt.Errorf("unsupported Google Apps type: %s; this server supports Docs and Sheets", meta.MimeType)), nil, nil
 		}
 
 		// Regular file — check MIME type before downloading.
 		if !isTextMime(meta.MimeType) {
-			return errorResult(fmt.Errorf("Binary file (%s) cannot be displayed as text", meta.MimeType)), nil, nil
+			return errorResult(fmt.Errorf("binary file (%s) cannot be displayed as text", meta.MimeType)), nil, nil
 		}
 		data, _, err := downloadFile(ctx, driveSvc, input.FileID)
 		if err != nil {

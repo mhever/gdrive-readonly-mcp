@@ -1,6 +1,8 @@
 # Binaries
 gdrive-readonly-mcp
-gdrive-readonly-mcp.exe
+gdrive-readonly-mcp-darwin-amd64
+gdrive-readonly-mcp-darwin-arm64
+gdrive-readonly-mcp-linux-amd64
 *.exe
 
 # OAuth credentials (NEVER commit these)
