@@ -21,6 +21,8 @@ This server is designed with security as a first principle:
 - **Download size cap** -- Non-Google file downloads are capped at 1 MB to prevent memory exhaustion.
 - **Binary file rejection** -- Only text-based MIME types are served; binary files return a clear error.
 - **CSRF protection** -- The OAuth callback flow uses a cryptographically random state parameter.
+- **API call timeouts** -- Every Google API call is wrapped with a 30-second context timeout, preventing a hung upstream call from stalling the MCP server indefinitely.
+- **Rate limiting** -- Google API calls are rate-limited to 5 requests per second with a burst allowance of 10, preventing LLM retry loops from exhausting Google API quotas.
 - **No secrets in code** -- Credentials and tokens are loaded from external files, excluded from version control via `.gitignore`.
 
 ## Prerequisites

@@ -21,8 +21,14 @@ const (
 func readSpreadsheet(ctx context.Context, svc *sheets.Service, fileID string, rangeStr string) (string, error) {
 	if rangeStr == "" {
 		// Get spreadsheet metadata to find the first sheet name.
+		if err := apiLimiter.Wait(ctx); err != nil {
+			return "", fmt.Errorf("rate limited: %w", err)
+		}
+		metaCtx, metaCancel := withTimeout(ctx)
+		defer metaCancel()
+
 		spreadsheet, err := svc.Spreadsheets.Get(fileID).
-			Context(ctx).
+			Context(metaCtx).
 			Fields("sheets.properties.title").
 			Do()
 		if err != nil {
@@ -38,8 +44,14 @@ func readSpreadsheet(ctx context.Context, svc *sheets.Service, fileID string, ra
 		rangeStr = fmt.Sprintf("'%s'", strings.ReplaceAll(title, "'", "''"))
 	}
 
+	if err := apiLimiter.Wait(ctx); err != nil {
+		return "", fmt.Errorf("rate limited: %w", err)
+	}
+	valCtx, valCancel := withTimeout(ctx)
+	defer valCancel()
+
 	valueRange, err := svc.Spreadsheets.Values.Get(fileID, rangeStr).
-		Context(ctx).
+		Context(valCtx).
 		Do()
 	if err != nil {
 		return "", wrapAPIError(err, "reading spreadsheet values")

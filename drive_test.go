@@ -273,7 +273,7 @@ func TestDownloadFileRejectsInvalidIDs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// downloadFile should reject invalid file IDs before making any API call.
-			_, _, err := downloadFile(context.Background(), nil, tt.fileID)
+			_, _, err := downloadFile(context.Background(), nil, tt.fileID, nil)
 			if err == nil {
 				t.Errorf("downloadFile(%q) should have returned an error", tt.fileID)
 			}

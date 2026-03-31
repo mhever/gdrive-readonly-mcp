@@ -83,7 +83,6 @@ func listFiles(ctx context.Context, svc *drive.Service, query, folderID string, 
 	q := strings.Join(parts, " and ")
 
 	call := svc.Files.List().
-		Context(ctx).
 		PageSize(int64(pageSize)).
 		Fields("nextPageToken, files(id,name,mimeType,modifiedTime,size,parents)")
 
@@ -94,7 +93,13 @@ func listFiles(ctx context.Context, svc *drive.Service, query, folderID string, 
 		call = call.PageToken(pageToken)
 	}
 
-	result, err := call.Do()
+	if err := apiLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limited: %w", err)
+	}
+	callCtx, cancel := withTimeout(ctx)
+	defer cancel()
+
+	result, err := call.Context(callCtx).Do()
 	if err != nil {
 		return nil, wrapAPIError(err, "listing files")
 	}
@@ -115,7 +120,6 @@ func searchFiles(ctx context.Context, svc *drive.Service, query string, pageSize
 	q := fmt.Sprintf("name contains '%s' or fullText contains '%s'", escaped, escaped)
 
 	call := svc.Files.List().
-		Context(ctx).
 		Q(q).
 		PageSize(int64(pageSize)).
 		Fields("nextPageToken, files(id,name,mimeType,modifiedTime,size)")
@@ -124,7 +128,13 @@ func searchFiles(ctx context.Context, svc *drive.Service, query string, pageSize
 		call = call.PageToken(pageToken)
 	}
 
-	result, err := call.Do()
+	if err := apiLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limited: %w", err)
+	}
+	callCtx, cancel := withTimeout(ctx)
+	defer cancel()
+
+	result, err := call.Context(callCtx).Do()
 	if err != nil {
 		return nil, wrapAPIError(err, "searching files")
 	}
@@ -136,7 +146,14 @@ func getFileMetadata(ctx context.Context, svc *drive.Service, fileID string) (*d
 	if err := validateFileID(fileID); err != nil {
 		return nil, err
 	}
-	file, err := svc.Files.Get(fileID).Context(ctx).Fields("*").Do()
+
+	if err := apiLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limited: %w", err)
+	}
+	callCtx, cancel := withTimeout(ctx)
+	defer cancel()
+
+	file, err := svc.Files.Get(fileID).Context(callCtx).Fields("*").Do()
 	if err != nil {
 		return nil, wrapAPIError(err, "getting file metadata")
 	}
@@ -145,15 +162,26 @@ func getFileMetadata(ctx context.Context, svc *drive.Service, fileID string) (*d
 
 // downloadFile downloads a non-Google-Apps file, enforcing a size cap of maxDownloadSize.
 // Returns the file bytes and its MIME type.
-func downloadFile(ctx context.Context, svc *drive.Service, fileID string) ([]byte, string, error) {
+// If meta is non-nil, its Size and MimeType are used and the metadata API call is skipped.
+// If meta is nil, metadata is fetched first.
+func downloadFile(ctx context.Context, svc *drive.Service, fileID string, meta *drive.File) ([]byte, string, error) {
 	if err := validateFileID(fileID); err != nil {
 		return nil, "", err
 	}
 
-	// Get metadata first to check size.
-	meta, err := svc.Files.Get(fileID).Context(ctx).Fields("size,mimeType").Do()
-	if err != nil {
-		return nil, "", wrapAPIError(err, "getting file metadata for download")
+	if meta == nil {
+		// Fetch metadata to check size before downloading.
+		if err := apiLimiter.Wait(ctx); err != nil {
+			return nil, "", fmt.Errorf("rate limited: %w", err)
+		}
+		metaCtx, metaCancel := withTimeout(ctx)
+		defer metaCancel()
+
+		var err error
+		meta, err = svc.Files.Get(fileID).Context(metaCtx).Fields("size,mimeType").Do()
+		if err != nil {
+			return nil, "", wrapAPIError(err, "getting file metadata for download")
+		}
 	}
 
 	// Note: The metadata size check above is defense-in-depth only.
@@ -164,7 +192,13 @@ func downloadFile(ctx context.Context, svc *drive.Service, fileID string) ([]byt
 		return nil, "", fmt.Errorf("file too large (%d bytes, max %d bytes)", meta.Size, maxDownloadSize)
 	}
 
-	resp, err := svc.Files.Get(fileID).Context(ctx).Download()
+	if err := apiLimiter.Wait(ctx); err != nil {
+		return nil, "", fmt.Errorf("rate limited: %w", err)
+	}
+	dlCtx, dlCancel := withTimeout(ctx)
+	defer dlCancel()
+
+	resp, err := svc.Files.Get(fileID).Context(dlCtx).Download()
 	if err != nil {
 		return nil, "", wrapAPIError(err, "downloading file")
 	}

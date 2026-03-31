@@ -152,7 +152,7 @@ func handleReadFile(ctx context.Context, req *mcp.CallToolRequest, input readFil
 		if !isTextMime(meta.MimeType) {
 			return errorResult(fmt.Errorf("binary file (%s) cannot be displayed as text", meta.MimeType)), nil, nil
 		}
-		data, _, err := downloadFile(ctx, driveSvc, input.FileID)
+		data, _, err := downloadFile(ctx, driveSvc, input.FileID, meta)
 		if err != nil {
 			return errorResult(err), nil, nil
 		}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"google.golang.org/api/docs/v1"
@@ -13,7 +14,13 @@ const maxDocSize = 5 << 20 // 5MB max extracted text
 // It walks the document body's structural elements to extract text from
 // paragraphs, tables, section breaks, and table of contents entries.
 func readDocument(ctx context.Context, svc *docs.Service, fileID string) (string, error) {
-	doc, err := svc.Documents.Get(fileID).Context(ctx).Do()
+	if err := apiLimiter.Wait(ctx); err != nil {
+		return "", fmt.Errorf("rate limited: %w", err)
+	}
+	callCtx, cancel := withTimeout(ctx)
+	defer cancel()
+
+	doc, err := svc.Documents.Get(fileID).Context(callCtx).Do()
 	if err != nil {
 		return "", wrapAPIError(err, "reading document")
 	}
