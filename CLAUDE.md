@@ -18,3 +18,6 @@ GOOS=windows GOARCH=amd64 go build -o gdrive-readonly-mcp.exe .
 - File IDs must be validated before API calls
 - Token files use 0600 permissions
 - Use latest versions of all dependencies
+
+## Agent workflow
+See [AGENTS.md](AGENTS.md) for the multi-agent coding/review pipeline used in this project.
