@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -44,6 +45,15 @@ type searchInput struct {
 
 type getFileMetadataInput struct {
 	FileID string `json:"file_id" jsonschema:"Google Drive file ID"`
+}
+
+type readFileInput struct {
+	FileID string `json:"file_id" jsonschema:"Google Drive file ID to read"`
+}
+
+type readSheetInput struct {
+	FileID string `json:"file_id" jsonschema:"Google Sheets spreadsheet ID"`
+	Range  string `json:"range,omitempty" jsonschema:"optional A1 notation range (e.g. Sheet1!A1:E10); if omitted reads all data from first sheet"`
 }
 
 // --- Tool handlers ---
@@ -104,6 +114,71 @@ func handleGetFileMetadata(ctx context.Context, req *mcp.CallToolRequest, input 
 	return textResult(string(data)), nil, nil
 }
 
+func handleReadFile(ctx context.Context, req *mcp.CallToolRequest, input readFileInput) (*mcp.CallToolResult, any, error) {
+	if input.FileID == "" {
+		return errorResult(fmt.Errorf("file_id is required")), nil, nil
+	}
+	if err := validateFileID(input.FileID); err != nil {
+		return errorResult(fmt.Errorf("invalid file_id: %w", err)), nil, nil
+	}
+
+	meta, err := getFileMetadata(ctx, driveSvc, input.FileID)
+	if err != nil {
+		return errorResult(err), nil, nil
+	}
+
+	switch meta.MimeType {
+	case "application/vnd.google-apps.document":
+		text, err := readDocument(ctx, docsSvc, input.FileID)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return textResult(text), nil, nil
+
+	case "application/vnd.google-apps.spreadsheet":
+		text, err := readSpreadsheet(ctx, sheetsSvc, input.FileID, "")
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return textResult(text), nil, nil
+
+	default:
+		// Check for other unsupported Google Apps types.
+		if strings.HasPrefix(meta.MimeType, "application/vnd.google-apps.") {
+			return errorResult(fmt.Errorf("Unsupported Google Apps type: %s. This server supports Docs and Sheets.", meta.MimeType)), nil, nil
+		}
+
+		// Regular file — check MIME type before downloading.
+		if !isTextMime(meta.MimeType) {
+			return errorResult(fmt.Errorf("Binary file (%s) cannot be displayed as text", meta.MimeType)), nil, nil
+		}
+		data, _, err := downloadFile(ctx, driveSvc, input.FileID)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return textResult(string(data)), nil, nil
+	}
+}
+
+func handleReadSheet(ctx context.Context, req *mcp.CallToolRequest, input readSheetInput) (*mcp.CallToolResult, any, error) {
+	if input.FileID == "" {
+		return errorResult(fmt.Errorf("file_id is required")), nil, nil
+	}
+	if err := validateFileID(input.FileID); err != nil {
+		return errorResult(fmt.Errorf("invalid file_id: %w", err)), nil, nil
+	}
+
+	if len(input.Range) > 500 {
+		return errorResult(fmt.Errorf("range too long (%d chars, max 500)", len(input.Range))), nil, nil
+	}
+
+	text, err := readSpreadsheet(ctx, sheetsSvc, input.FileID, input.Range)
+	if err != nil {
+		return errorResult(err), nil, nil
+	}
+	return textResult(text), nil, nil
+}
+
 func registerTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gdrive_list_files",
@@ -128,4 +203,20 @@ func registerTools(server *mcp.Server) {
 			ReadOnlyHint: true,
 		},
 	}, handleGetFileMetadata)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "gdrive_read_file",
+		Description: "Read the content of a Google Drive file. Supports Google Docs (text extraction), Google Sheets (first sheet as TSV), and regular text files (direct download). Binary files and unsupported Google Apps types return an error.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint: true,
+		},
+	}, handleReadFile)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "gdrive_read_sheet",
+		Description: "Read values from a Google Sheets spreadsheet, optionally specifying an A1 notation range. Returns data formatted as TSV. If no range is specified, reads all data from the first sheet.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint: true,
+		},
+	}, handleReadSheet)
 }

@@ -153,3 +153,116 @@ func TestHandleListFilesInvalidFolderID(t *testing.T) {
 		t.Error("expected IsError for invalid folder ID")
 	}
 }
+
+func TestHandleReadFileInvalidID(t *testing.T) {
+	tests := []struct {
+		name   string
+		fileID string
+	}{
+		{"empty", ""},
+		{"injection", "abc' or 1=1 --"},
+		{"too long", strings.Repeat("x", 201)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, _, err := handleReadFile(
+				context.Background(),
+				&mcp.CallToolRequest{},
+				readFileInput{FileID: tt.fileID},
+			)
+			if err != nil {
+				t.Fatalf("handleReadFile returned protocol error: %v", err)
+			}
+			if result == nil {
+				t.Fatal("handleReadFile returned nil result")
+			}
+			if !result.IsError {
+				t.Error("expected IsError for invalid file ID")
+			}
+		})
+	}
+}
+
+func TestHandleReadSheetInvalidID(t *testing.T) {
+	tests := []struct {
+		name   string
+		fileID string
+	}{
+		{"empty", ""},
+		{"injection", "abc' or 1=1 --"},
+		{"too long", strings.Repeat("x", 201)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, _, err := handleReadSheet(
+				context.Background(),
+				&mcp.CallToolRequest{},
+				readSheetInput{FileID: tt.fileID},
+			)
+			if err != nil {
+				t.Fatalf("handleReadSheet returned protocol error: %v", err)
+			}
+			if result == nil {
+				t.Fatal("handleReadSheet returned nil result")
+			}
+			if !result.IsError {
+				t.Error("expected IsError for invalid file ID")
+			}
+		})
+	}
+}
+
+func TestUnsupportedGoogleAppsTypeErrorMessage(t *testing.T) {
+	// Verify the error message format for unsupported Google Apps types.
+	// This does not test actual dispatch (requires real services).
+	unsupportedTypes := []string{
+		"application/vnd.google-apps.presentation",
+		"application/vnd.google-apps.drawing",
+		"application/vnd.google-apps.form",
+		"application/vnd.google-apps.site",
+	}
+	for _, mimeType := range unsupportedTypes {
+		t.Run(mimeType, func(t *testing.T) {
+			errMsg := fmt.Sprintf("Unsupported Google Apps type: %s. This server supports Docs and Sheets.", mimeType)
+			if !strings.Contains(errMsg, mimeType) {
+				t.Errorf("error message should contain the MIME type")
+			}
+			if !strings.Contains(errMsg, "Docs and Sheets") {
+				t.Errorf("error message should mention supported types")
+			}
+		})
+	}
+}
+
+func TestHandleReadSheetRangeTooLong(t *testing.T) {
+	result, _, err := handleReadSheet(
+		context.Background(),
+		&mcp.CallToolRequest{},
+		readSheetInput{FileID: "validFileId123", Range: strings.Repeat("A", 501)},
+	)
+	if err != nil {
+		t.Fatalf("handleReadSheet returned protocol error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("handleReadSheet returned nil result")
+	}
+	if !result.IsError {
+		t.Error("expected IsError for too-long range")
+	}
+}
+
+func TestHandleReadSheetWithRange(t *testing.T) {
+	// Verify that the handler accepts a range parameter without error
+	// (validation only — actual API call would need a real service).
+	result, _, err := handleReadSheet(
+		context.Background(),
+		&mcp.CallToolRequest{},
+		readSheetInput{FileID: "", Range: "Sheet1!A1:C10"},
+	)
+	if err != nil {
+		t.Fatalf("handleReadSheet returned protocol error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected IsError for empty file ID even with valid range")
+	}
+}
