@@ -186,7 +186,10 @@ func TestGenerateStateUniqueness(t *testing.T) {
 func TestResolveFilePath(t *testing.T) {
 	t.Run("env var takes precedence", func(t *testing.T) {
 		t.Setenv("TEST_CRED_PATH", "/custom/path/credentials.json")
-		got := resolveFilePath("TEST_CRED_PATH", "credentials.json")
+		got, err := resolveFilePath("TEST_CRED_PATH", "credentials.json")
+		if err != nil {
+			t.Fatalf("resolveFilePath returned error: %v", err)
+		}
 		if got != "/custom/path/credentials.json" {
 			t.Errorf("resolveFilePath = %q, want /custom/path/credentials.json", got)
 		}
@@ -195,7 +198,10 @@ func TestResolveFilePath(t *testing.T) {
 	t.Run("fallback to executable dir", func(t *testing.T) {
 		// Unset env var to test fallback.
 		t.Setenv("TEST_UNUSED_VAR", "")
-		got := resolveFilePath("NONEXISTENT_ENV_VAR_12345", "credentials.json")
+		got, err := resolveFilePath("NONEXISTENT_ENV_VAR_12345", "credentials.json")
+		if err != nil {
+			t.Fatalf("resolveFilePath returned error: %v", err)
+		}
 		if filepath.Base(got) != "credentials.json" {
 			t.Errorf("resolveFilePath base = %q, want credentials.json", filepath.Base(got))
 		}

@@ -13,7 +13,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -32,15 +35,15 @@ var oauthScopes = []string{
 // resolveFilePath returns the path for a config file.
 // It checks the given env var first, then falls back to a file
 // in the same directory as the executable.
-func resolveFilePath(envVar, filename string) string {
+func resolveFilePath(envVar, filename string) (string, error) {
 	if v := os.Getenv(envVar); v != "" {
-		return v
+		return v, nil
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		log.Fatalf("Failed to determine executable path: %v", err)
+		return "", fmt.Errorf("failed to determine executable path: %w", err)
 	}
-	return filepath.Join(filepath.Dir(exe), filename)
+	return filepath.Join(filepath.Dir(exe), filename), nil
 }
 
 // loadOAuthConfig reads credentials.json and returns an OAuth2 config.
@@ -80,6 +83,9 @@ func saveToken(path string, token *oauth2.Token) error {
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("unable to write token file %q: %w", path, err)
 	}
+	if err := os.Chmod(path, 0600); err != nil {
+		return fmt.Errorf("unable to set permissions on token file %q: %w", path, err)
+	}
 	return nil
 }
 
@@ -101,17 +107,39 @@ func openBrowser(url string) error {
 	case "darwin":
 		cmd = exec.Command("open", url)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
+		cmd = exec.Command("cmd", "/c", "start", "", url)
 	default:
 		return fmt.Errorf("unsupported platform %q — open this URL manually: %s", runtime.GOOS, url)
 	}
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
+// sanitizeOAuthError truncates and strips control characters from an OAuth error parameter.
+func sanitizeOAuthError(s string) string {
+	const maxLen = 200
+	if len(s) > maxLen {
+		s = s[:maxLen]
+	}
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // getTokenFromWeb runs a local HTTP server to handle the OAuth callback,
 // opens the browser for user consent, and returns the resulting token.
 // All user-facing output goes to stderr (stdout is the MCP transport).
 func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
+	// Work on a copy to avoid mutating the caller's config.
+	configCopy := *config
+	cfg := &configCopy
+
 	state, err := generateState()
 	if err != nil {
 		return nil, err
@@ -123,31 +151,48 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 		return nil, fmt.Errorf("failed to start local HTTP server: %w", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	config.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+	cfg.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d/callback", port)
 
 	codeChan := make(chan string, 1)
 	errChan := make(chan error, 1)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		if r.URL.Query().Get("state") != state {
 			http.Error(w, "Invalid state parameter", http.StatusBadRequest)
-			errChan <- fmt.Errorf("OAuth state mismatch: possible CSRF attack")
+			select {
+			case errChan <- fmt.Errorf("OAuth state mismatch: possible CSRF attack"):
+			default:
+			}
 			return
 		}
 		if errMsg := r.URL.Query().Get("error"); errMsg != "" {
-			http.Error(w, "Authorization failed: "+errMsg, http.StatusBadRequest)
-			errChan <- fmt.Errorf("OAuth error: %s", errMsg)
+			sanitized := sanitizeOAuthError(errMsg)
+			http.Error(w, "Authorization failed: "+sanitized, http.StatusBadRequest)
+			select {
+			case errChan <- fmt.Errorf("OAuth error: %s", sanitized):
+			default:
+			}
 			return
 		}
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			http.Error(w, "No authorization code received", http.StatusBadRequest)
-			errChan <- fmt.Errorf("no authorization code in callback")
+			select {
+			case errChan <- fmt.Errorf("no authorization code in callback"):
+			default:
+			}
 			return
 		}
 		fmt.Fprint(w, "<html><body><h1>Authorization successful!</h1><p>You can close this window.</p></body></html>")
-		codeChan <- code
+		select {
+		case codeChan <- code:
+		default:
+		}
 	})
 
 	server := &http.Server{
@@ -162,7 +207,7 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 		}
 	}()
 
-	authURL := config.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
+	authURL := cfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
 	log.Printf("Opening browser for Google authorization...")
 	log.Printf("If the browser doesn't open, visit this URL manually:\n%s", authURL)
 
@@ -189,7 +234,7 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 	_ = server.Shutdown(ctx)
 
 	// Exchange the auth code for a token.
-	token, err := config.Exchange(context.Background(), code)
+	token, err := cfg.Exchange(context.Background(), code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange authorization code: %w", err)
 	}
@@ -235,12 +280,16 @@ func getOAuthClient(credentialsPath, tokenPath string) (*http.Client, error) {
 
 // persistingTokenSource wraps a token source and saves refreshed tokens to disk.
 type persistingTokenSource struct {
+	mu        sync.Mutex
 	base      oauth2.TokenSource
 	tokenPath string
 	lastToken *oauth2.Token
 }
 
 func (s *persistingTokenSource) Token() (*oauth2.Token, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	token, err := s.base.Token()
 	if err != nil {
 		return nil, err
