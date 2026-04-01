@@ -151,7 +151,7 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 		return nil, fmt.Errorf("failed to start local HTTP server: %w", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	cfg.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+	cfg.RedirectURL = fmt.Sprintf("http://localhost:%d/callback", port)
 
 	codeChan := make(chan string, 1)
 	errChan := make(chan error, 1)
