@@ -106,7 +106,9 @@ func listFiles(ctx context.Context, svc *drive.Service, query, folderID string, 
 	return result, nil
 }
 
-// searchFiles searches Drive for files matching the query by name or full text.
+// searchFiles searches Drive for files matching the query.
+// It searches by filename first. If no results are found and pageToken is empty,
+// it falls back to a full-text content search.
 // Default pageSize is 20, capped at 100.
 func searchFiles(ctx context.Context, svc *drive.Service, query string, pageSize int, pageToken string) (*drive.FileList, error) {
 	if pageSize <= 0 {
@@ -117,12 +119,15 @@ func searchFiles(ctx context.Context, svc *drive.Service, query string, pageSize
 	}
 
 	escaped := escapeQuery(query)
-	q := fmt.Sprintf("name contains '%s' or fullText contains '%s'", escaped, escaped)
+	fields := "nextPageToken, files(id,name,mimeType,modifiedTime,size)"
+
+	// First: search by filename.
+	nameQ := fmt.Sprintf("name contains '%s'", escaped)
 
 	call := svc.Files.List().
-		Q(q).
+		Q(nameQ).
 		PageSize(int64(pageSize)).
-		Fields("nextPageToken, files(id,name,mimeType,modifiedTime,size)")
+		Fields(googleapi.Field(fields))
 
 	if pageToken != "" {
 		call = call.PageToken(pageToken)
@@ -136,8 +141,37 @@ func searchFiles(ctx context.Context, svc *drive.Service, query string, pageSize
 
 	result, err := call.Context(callCtx).Do()
 	if err != nil {
-		return nil, wrapAPIError(err, "searching files")
+		return nil, wrapAPIError(err, "searching files by name")
 	}
+
+	// If name search found results (or we're paginating), return them.
+	if len(result.Files) > 0 || pageToken != "" {
+		return result, nil
+	}
+
+	// Fallback: search by full-text content.
+	// Content-fallback results are not paginated to avoid pageToken
+	// cross-contamination between the two different query types.
+	contentQ := fmt.Sprintf("fullText contains '%s'", escaped)
+
+	if err := apiLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limited: %w", err)
+	}
+	fallbackCtx, fallbackCancel := withTimeout(ctx)
+	defer fallbackCancel()
+
+	result, err = svc.Files.List().
+		Q(contentQ).
+		PageSize(int64(pageSize)).
+		Fields(googleapi.Field(fields)).
+		Context(fallbackCtx).Do()
+	if err != nil {
+		return nil, wrapAPIError(err, "searching files by content")
+	}
+
+	// Clear NextPageToken to prevent the caller from paginating
+	// content results with a token that would be misrouted to the name query.
+	result.NextPageToken = ""
 	return result, nil
 }
 

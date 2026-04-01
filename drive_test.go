@@ -235,7 +235,7 @@ func TestQueryBuildingEdgeCases(t *testing.T) {
 	t.Run("search query with single quotes", func(t *testing.T) {
 		input := "it's a test"
 		escaped := escapeQuery(input)
-		q := fmt.Sprintf("name contains '%s' or fullText contains '%s'", escaped, escaped)
+		q := fmt.Sprintf("name contains '%s'", escaped)
 		if !strings.Contains(q, `it\'s a test`) {
 			t.Errorf("query not properly escaped: %s", q)
 		}

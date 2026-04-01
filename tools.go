@@ -38,7 +38,7 @@ type listFilesInput struct {
 }
 
 type searchInput struct {
-	Query     string `json:"query" jsonschema:"search query to find files by name or content"`
+	Query     string `json:"query" jsonschema:"search query (searches filenames first, then file contents if no name matches)"`
 	PageSize  int    `json:"page_size,omitempty" jsonschema:"number of results per page (default 20, max 100)"`
 	PageToken string `json:"page_token,omitempty" jsonschema:"token for the next page of results"`
 }
@@ -190,7 +190,7 @@ func registerTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gdrive_search",
-		Description: "Search for files in Google Drive by name or content. Returns matching files with their IDs, types, and modification times.",
+		Description: "Search for files in Google Drive. Searches by filename first; falls back to full-text content search if no name matches are found. Returns matching files with their IDs, types, and modification times.",
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint: true,
 		},
