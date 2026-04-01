@@ -84,7 +84,12 @@ func listFiles(ctx context.Context, svc *drive.Service, query, folderID string, 
 
 	call := svc.Files.List().
 		PageSize(int64(pageSize)).
-		Fields("nextPageToken, files(id,name,mimeType,modifiedTime,size,parents)")
+		Fields("nextPageToken, files(id,name,mimeType,modifiedTime,size,parents)").
+		IncludeItemsFromAllDrives(true).
+		SupportsAllDrives(true)
+
+	// Always search all drives including shared drives and "Shared with me".
+	call = call.Corpora("allDrives")
 
 	if q != "" {
 		call = call.Q(q)
@@ -127,7 +132,10 @@ func searchFiles(ctx context.Context, svc *drive.Service, query string, pageSize
 	call := svc.Files.List().
 		Q(nameQ).
 		PageSize(int64(pageSize)).
-		Fields(googleapi.Field(fields))
+		Fields(googleapi.Field(fields)).
+		IncludeItemsFromAllDrives(true).
+		SupportsAllDrives(true).
+		Corpora("allDrives")
 
 	if pageToken != "" {
 		call = call.PageToken(pageToken)
@@ -164,6 +172,9 @@ func searchFiles(ctx context.Context, svc *drive.Service, query string, pageSize
 		Q(contentQ).
 		PageSize(int64(pageSize)).
 		Fields(googleapi.Field(fields)).
+		IncludeItemsFromAllDrives(true).
+		SupportsAllDrives(true).
+		Corpora("allDrives").
 		Context(fallbackCtx).Do()
 	if err != nil {
 		return nil, wrapAPIError(err, "searching files by content")
@@ -187,7 +198,7 @@ func getFileMetadata(ctx context.Context, svc *drive.Service, fileID string) (*d
 	callCtx, cancel := withTimeout(ctx)
 	defer cancel()
 
-	file, err := svc.Files.Get(fileID).Context(callCtx).Fields("*").Do()
+	file, err := svc.Files.Get(fileID).SupportsAllDrives(true).Context(callCtx).Fields("*").Do()
 	if err != nil {
 		return nil, wrapAPIError(err, "getting file metadata")
 	}
@@ -212,7 +223,7 @@ func downloadFile(ctx context.Context, svc *drive.Service, fileID string, meta *
 		defer metaCancel()
 
 		var err error
-		meta, err = svc.Files.Get(fileID).Context(metaCtx).Fields("size,mimeType").Do()
+		meta, err = svc.Files.Get(fileID).SupportsAllDrives(true).Context(metaCtx).Fields("size,mimeType").Do()
 		if err != nil {
 			return nil, "", wrapAPIError(err, "getting file metadata for download")
 		}
@@ -232,7 +243,7 @@ func downloadFile(ctx context.Context, svc *drive.Service, fileID string, meta *
 	dlCtx, dlCancel := withTimeout(ctx)
 	defer dlCancel()
 
-	resp, err := svc.Files.Get(fileID).Context(dlCtx).Download()
+	resp, err := svc.Files.Get(fileID).SupportsAllDrives(true).Context(dlCtx).Download()
 	if err != nil {
 		return nil, "", wrapAPIError(err, "downloading file")
 	}
@@ -296,6 +307,10 @@ func formatFileList(fileList *drive.FileList) string {
 			fmt.Fprintf(&sb, "  Size: %d bytes\n", f.Size)
 		}
 		sb.WriteString("\n")
+	}
+
+	if fileList.IncompleteSearch {
+		sb.WriteString("Note: Search results may be incomplete — not all sources were searched.\n\n")
 	}
 
 	if fileList.NextPageToken != "" {
